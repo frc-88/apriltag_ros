@@ -393,7 +393,8 @@ AprilTagDetectionArray TagDetector::detectTags (
       pose.header = tag_detection_array.detections[i].pose.header;
       tf::Stamped<tf::Transform> tag_transform;
       tf::poseStampedMsgToTF(pose, tag_transform);
-      timestamp_offset = 1E-6 * i;  // prevent TF_REPEATED_DATA warning
+      double random_offset = ((double) rand() / (RAND_MAX));
+      timestamp_offset = random_offset * 1E-6 * i;  // prevent TF_REPEATED_DATA warning
       tf_pub_.sendTransform(tf::StampedTransform(tag_transform,
                                                  tag_transform.stamp_ + ros::Duration(timestamp_offset),
                                                  image->header.frame_id,
