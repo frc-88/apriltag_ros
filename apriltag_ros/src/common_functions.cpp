@@ -385,6 +385,7 @@ AprilTagDetectionArray TagDetector::detectTags (
   }
 
   // If set, publish the transform /tf topic
+  double timestamp_offset = 0.0;
   if (publish_tf_) {
     for (unsigned int i=0; i<tag_detection_array.detections.size(); i++) {
       geometry_msgs::PoseStamped pose;
@@ -392,8 +393,9 @@ AprilTagDetectionArray TagDetector::detectTags (
       pose.header = tag_detection_array.detections[i].pose.header;
       tf::Stamped<tf::Transform> tag_transform;
       tf::poseStampedMsgToTF(pose, tag_transform);
+      timestamp_offset = 1E-6 * i;  // prevent TF_REPEATED_DATA warning
       tf_pub_.sendTransform(tf::StampedTransform(tag_transform,
-                                                 tag_transform.stamp_,
+                                                 tag_transform.stamp_ + ros::Duration(timestamp_offset),
                                                  image->header.frame_id,
                                                  detection_names[i]));
     }
