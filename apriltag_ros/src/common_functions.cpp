@@ -385,8 +385,8 @@ AprilTagDetectionArray TagDetector::detectTags (
   }
 
   // If set, publish the transform /tf topic
-  double timestamp_offset = 0.0;
   if (publish_tf_) {
+    double timestamp_offset = 0.0;
     for (unsigned int i=0; i<tag_detection_array.detections.size(); i++) {
       geometry_msgs::PoseStamped pose;
       pose.pose = tag_detection_array.detections[i].pose.pose.pose;
@@ -394,7 +394,7 @@ AprilTagDetectionArray TagDetector::detectTags (
       tf::Stamped<tf::Transform> tag_transform;
       tf::poseStampedMsgToTF(pose, tag_transform);
       double random_offset = ((double) rand() / (RAND_MAX));
-      timestamp_offset = random_offset * 1E-6 * i;  // prevent TF_REPEATED_DATA warning
+      timestamp_offset = random_offset * 1E-6 * (i + 1);  // prevent TF_REPEATED_DATA warning
       tf_pub_.sendTransform(tf::StampedTransform(tag_transform,
                                                  tag_transform.stamp_ + ros::Duration(timestamp_offset),
                                                  image->header.frame_id,
