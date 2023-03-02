@@ -225,13 +225,13 @@ class TagDetector
 
   double getDepthInRegion(
       cv::Mat depth_image,
-      std::vector<cv::Point2d >& imagePoints,
+      apriltag_detection_t* detection,
       double min_range,
       double max_range,
       double unit_conversion);
   
-  void applyDepthToObjectPoints(
-      std::vector<cv::Point3d >& objectPoints,
+  void applyDepthToDetection(
+      apriltag_detection_t* detection,
       double z_dist);
 
   double getDepthConversion(std::string encoding);

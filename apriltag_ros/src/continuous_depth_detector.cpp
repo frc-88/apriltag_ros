@@ -58,11 +58,11 @@ void ContinuousDepthDetector::onInit ()
   int queue_size;
   pnh.param<int>("queue_size", queue_size, 1);
   camera_image_subscriber_ =
-      it_->subscribeCamera("image_rect", queue_size,
+      it_->subscribeCamera("color/image_rect", queue_size,
                           &ContinuousDepthDetector::imageCallback, this,
                           image_transport::TransportHints(transport_hint));
   depth_image_subscriber_ = 
-    it_->subscribe("depth_rect", queue_size,
+    it_->subscribe("depth/image_rect", queue_size,
                   &ContinuousDepthDetector::depthCallback, this,
                   image_transport::TransportHints(depth_transport_hint));
   tag_detections_publisher_ =
@@ -125,6 +125,7 @@ void ContinuousDepthDetector::imageCallback (
   // Publish detected tags in the image by AprilTag 2
   if (cv_depth_ == NULL) {
     ROS_WARN_THROTTLE(2.0, "No depth image received. Can't find tags.");
+    return;
   }
   tag_detections_publisher_.publish(
       tag_detector_->detectTags(cv_image_, cv_depth_, camera_info, depth_min_range_, depth_max_range_));
