@@ -459,16 +459,19 @@ void TagDetector::removeDuplicates ()
 
 double TagDetector::getDepthInRegion(
   cv::Mat depth_image,
-  std::vector<cv::Point2d >& imagePoints,
+  apriltag_detection_t* detection,
   double min_range,
   double max_range,
   double unit_conversion)
 {
+  std::vector<cv::Point2d > image_points;
+  addImagePoints(detection, image_points);
+
   cv::Mat mask = cv::Mat::zeros(depth_image.rows, depth_image.cols, CV_8UC1);
   std::vector<std::vector<cv::Point>> fillContAll;
   std::vector<cv::Point> fillContSingle;
-  for (unsigned int index = 0; index < imagePoints.size(); index++) {
-    fillContSingle.push_back(cv::Point((int)imagePoints.at(index).x, (int)imagePoints.at(index).y));
+  for (unsigned int index = 0; index < image_points.size(); index++) {
+    fillContSingle.push_back(cv::Point((int)image_points.at(index).x, (int)image_points.at(index).y));
   }
   fillContAll.push_back(fillContSingle);
   cv::fillPoly(mask, fillContAll, cv::Scalar(255));
@@ -488,11 +491,12 @@ double TagDetector::getDepthInRegion(
   return z_dist;
 }
 
-void TagDetector::applyDepthToObjectPoints(
-      std::vector<cv::Point3d >& objectPoints,
+void TagDetector::applyDepthToDetection(
+      apriltag_detection_t* detection,
       double z_dist
   )
 {
+  cv::Mat homography_mat(detection->H->nrows, detection->H->ncols, CV_64F, detection->H->data);
   // find average z distance to all points (z_avg)
   // project a ray to each point
   // scale point along ray projection by z_dist / z_avg
@@ -502,12 +506,6 @@ void TagDetector::applyDepthToObjectPoints(
   }
   double z_avg = z_sum / objectPoints.size();
   double projection_scale = z_dist / z_avg;
-
-  for (unsigned int index = 0; index < objectPoints.size(); index++) {
-    objectPoints.at(index).x *= projection_scale;
-    objectPoints.at(index).y *= projection_scale;
-    objectPoints.at(index).z *= projection_scale;
-  }
 }
 
 double TagDetector::getDepthConversion(std::string encoding)
@@ -600,6 +598,21 @@ AprilTagDetectionArray TagDetector::detectTags (
     apriltag_detection_t *detection;
     zarray_get(detections_, i, &detection);
 
+    double z_dist = getDepthInRegion(
+      depth_image,
+      detection,
+      min_range,
+      max_range,
+      depth_unit_conversion
+    );
+
+    if (z_dist != 0.0) {
+      applyDepthToDetection(
+        detection,
+        z_dist
+      );
+    }
+
     // Bootstrap this for loop to find this tag's description amongst
     // the tag bundles. If found, add its points to the bundle's set of
     // object-image corresponding points (tag corners) for cv::solvePnP.
@@ -626,21 +639,6 @@ AprilTagDetectionArray TagDetector::detectTags (
 
         //===== Corner points in the image frame coordinates
         addImagePoints(detection, bundleImagePoints[bundleName]);
-
-        double z_dist = getDepthInRegion(
-          depth_image,
-          bundleImagePoints[bundleName],
-          min_range,
-          max_range,
-          depth_unit_conversion
-        );
-
-        if (z_dist != 0.0) {
-          applyDepthToObjectPoints(
-            bundleObjectPoints[bundleName],
-            z_dist
-          );
-        }
       }
     }
 
