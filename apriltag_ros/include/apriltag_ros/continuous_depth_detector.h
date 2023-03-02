@@ -40,8 +40,8 @@
  * Originator:        Danylo Malyuta, JPL
  ******************************************************************************/
 
-#ifndef APRILTAG_ROS_CONTINUOUS_DETECTOR_H
-#define APRILTAG_ROS_CONTINUOUS_DETECTOR_H
+#ifndef APRILTAG_ROS_CONTINUOUS_DEPTH_DETECTOR_H
+#define APRILTAG_ROS_CONTINUOUS_DEPTH_DETECTOR_H
 
 #include "apriltag_ros/common_functions.h"
 
@@ -80,7 +80,7 @@ class ContinuousDepthDetector: public nodelet::Nodelet
 
   std::shared_ptr<image_transport::ImageTransport> it_;
   image_transport::CameraSubscriber camera_image_subscriber_;
-  image_transport::Subscriber _depth_image_subscriber;
+  image_transport::Subscriber depth_image_subscriber_;
   image_transport::Publisher tag_detections_image_publisher_;
   ros::Publisher tag_detections_publisher_;
 
@@ -90,4 +90,4 @@ class ContinuousDepthDetector: public nodelet::Nodelet
 
 } // namespace apriltag_ros
 
-#endif // APRILTAG_ROS_CONTINUOUS_DETECTOR_H
+#endif // APRILTAG_ROS_CONTINUOUS_DEPTH_DETECTOR_H

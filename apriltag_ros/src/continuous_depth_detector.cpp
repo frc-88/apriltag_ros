@@ -50,6 +50,8 @@ void ContinuousDepthDetector::onInit ()
 
   std::string transport_hint;
   pnh.param<std::string>("transport_hint", transport_hint, "raw");
+  std::string depth_transport_hint;
+  pnh.param<std::string>("depth_transport_hint", depth_transport_hint, "raw");
   pnh.param<double>("depth_min_range", depth_min_range_, 0.0);
   pnh.param<double>("depth_max_range", depth_max_range_, 10.0);
 
@@ -59,6 +61,10 @@ void ContinuousDepthDetector::onInit ()
       it_->subscribeCamera("image_rect", queue_size,
                           &ContinuousDepthDetector::imageCallback, this,
                           image_transport::TransportHints(transport_hint));
+  depth_image_subscriber_ = 
+    it_->subscribe("depth_rect", queue_size,
+                  &ContinuousDepthDetector::depthCallback, this,
+                  image_transport::TransportHints(depth_transport_hint));
   tag_detections_publisher_ =
       nh.advertise<AprilTagDetectionArray>("tag_detections", 1);
   if (draw_tag_detections_image_)

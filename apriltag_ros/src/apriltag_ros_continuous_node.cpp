@@ -41,8 +41,15 @@ int main(int argc, char **argv)
   nodelet::M_string remap(ros::names::getRemappings());
   nodelet::V_string nargv;
 
+  ros::NodeHandle pnh("~");
+
+  std::string nodelet_name;
+  pnh.param<std::string>("nodelet_name", nodelet_name, "apriltag_ros/ContinuousDetector");
+
+  ROS_INFO("Loading nodelet %s", nodelet_name.c_str());
+
   nodelet.load(ros::this_node::getName(),
-              "apriltag_ros/ContinuousDetector",
+              nodelet_name,
               remap, nargv);
 
   ros::spin();
