@@ -457,6 +457,303 @@ void TagDetector::removeDuplicates ()
   }
 }
 
+double TagDetector::getDepthInRegion(
+  cv::Mat depth_image,
+  std::vector<cv::Point2d >& imagePoints,
+  double min_range,
+  double max_range,
+  double unit_conversion)
+{
+  cv::Mat mask = cv::Mat::zeros(depth_image.rows, depth_image.cols, CV_8UC1);
+  std::vector<std::vector<cv::Point>> fillContAll;
+  std::vector<cv::Point> fillContSingle;
+  for (unsigned int index = 0; index < imagePoints.size(); index++) {
+    fillContSingle.push_back(cv::Point((int)imagePoints.at(index).x, (int)imagePoints.at(index).y));
+  }
+  fillContAll.push_back(fillContSingle);
+  cv::fillPoly(mask, fillContAll, cv::Scalar(255));
+
+  cv::Mat min_mask = (depth_image > min_range);
+  min_mask.convertTo(min_mask, CV_8U);
+
+  cv::Mat max_mask = (depth_image < max_range);
+  max_mask.convertTo(max_mask, CV_8U);
+
+  cv::Mat target_mask;
+  cv::bitwise_and(mask, min_mask, target_mask);
+  cv::bitwise_and(target_mask, max_mask, target_mask);
+
+  double z_dist = cv::mean(depth_image, target_mask)[0];
+  z_dist *= unit_conversion;
+  return z_dist;
+}
+
+void TagDetector::applyDepthToObjectPoints(
+      std::vector<cv::Point3d >& objectPoints,
+      double z_dist
+  )
+{
+  // find average z distance to all points (z_avg)
+  // project a ray to each point
+  // scale point along ray projection by z_dist / z_avg
+  double z_sum = 0.0;
+  for (unsigned int index = 0; index < objectPoints.size(); index++) {
+    z_sum += objectPoints.at(index).z;
+  }
+  double z_avg = z_sum / objectPoints.size();
+  double projection_scale = z_dist / z_avg;
+
+  for (unsigned int index = 0; index < objectPoints.size(); index++) {
+    objectPoints.at(index).x *= projection_scale;
+    objectPoints.at(index).y *= projection_scale;
+    objectPoints.at(index).z *= projection_scale;
+  }
+}
+
+double TagDetector::getDepthConversion(std::string encoding)
+{
+  switch (sensor_msgs::image_encodings::bitDepth(encoding)) {
+    case 8:
+    case 16:
+      return 0.001;
+    case 32:
+    case 64:
+    default:
+      return 1.0;
+  };
+}
+
+AprilTagDetectionArray TagDetector::detectTags (
+    const cv_bridge::CvImagePtr& image,
+    const cv_bridge::CvImagePtr& depth,
+    const sensor_msgs::CameraInfoConstPtr& camera_info,
+    double min_range,
+    double max_range) {
+  // Convert image to AprilTag code's format
+  cv::Mat gray_image;
+  if (image->image.channels() == 1)
+  {
+    gray_image = image->image;
+  }
+  else
+  {
+    cv::cvtColor(image->image, gray_image, CV_BGR2GRAY);
+  }
+  cv::Mat depth_image;
+  if (depth->image.channels() == 1)
+  {
+    depth_image = depth->image;
+  }
+  else
+  {
+    cv::cvtColor(depth->image, depth_image, CV_BGR2GRAY);
+  }
+  double depth_unit_conversion = getDepthConversion(depth->encoding);
+  image_u8_t apriltag_image = { .width = gray_image.cols,
+                                  .height = gray_image.rows,
+                                  .stride = gray_image.cols,
+                                  .buf = gray_image.data
+  };
+
+  image_geometry::PinholeCameraModel camera_model;
+  camera_model.fromCameraInfo(camera_info);
+
+  // Get camera intrinsic properties for rectified image.
+  double fx = camera_model.fx(); // focal length in camera x-direction [px]
+  double fy = camera_model.fy(); // focal length in camera y-direction [px]
+  double cx = camera_model.cx(); // optical center x-coordinate [px]
+  double cy = camera_model.cy(); // optical center y-coordinate [px]
+
+  ROS_INFO_STREAM_ONCE("Camera model: fx = " << fx << ", fy = " << fy << ", cx = " << cx << ", cy = " << cy);
+
+  // Check if camera intrinsics are not available - if not the calculated
+  // transforms are meaningless.
+  if (fx == 0 && fy == 0) ROS_WARN_STREAM_THROTTLE(5, "fx and fy are zero. Are the camera intrinsics set?");
+
+  // Run AprilTag 2 algorithm on the image
+  if (detections_)
+  {
+    apriltag_detections_destroy(detections_);
+    detections_ = NULL;
+  }
+  detections_ = apriltag_detector_detect(td_, &apriltag_image);
+
+  // If remove_duplicates_ is set to true, then duplicate tags are not allowed.
+  // Thus any duplicate tag IDs visible in the scene must include at least 1
+  // erroneous detection. Remove any tags with duplicate IDs to ensure removal
+  // of these erroneous detections
+  if (remove_duplicates_)
+  {
+    removeDuplicates();
+  }
+
+  // Compute the estimated translation and rotation individually for each
+  // detected tag
+  AprilTagDetectionArray tag_detection_array;
+  std::vector<std::string > detection_names;
+  tag_detection_array.header = image->header;
+  std::map<std::string, std::vector<cv::Point3d > > bundleObjectPoints;
+  std::map<std::string, std::vector<cv::Point2d > > bundleImagePoints;
+  for (int i=0; i < zarray_size(detections_); i++)
+  {
+    // Get the i-th detected tag
+    apriltag_detection_t *detection;
+    zarray_get(detections_, i, &detection);
+
+    // Bootstrap this for loop to find this tag's description amongst
+    // the tag bundles. If found, add its points to the bundle's set of
+    // object-image corresponding points (tag corners) for cv::solvePnP.
+    // Don't yet run cv::solvePnP on the bundles, though, since we're still in
+    // the process of collecting all the object-image corresponding points
+    int tagID = detection->id;
+    bool is_part_of_bundle = false;
+    for (unsigned int j=0; j<tag_bundle_descriptions_.size(); j++)
+    {
+      // Iterate over the registered bundles
+      TagBundleDescription bundle = tag_bundle_descriptions_[j];
+
+      if (bundle.id2idx_.find(tagID) != bundle.id2idx_.end())
+      {
+        // This detected tag belongs to the j-th tag bundle (its ID was found in
+        // the bundle description)
+        is_part_of_bundle = true;
+        std::string bundleName = bundle.name();
+
+        //===== Corner points in the world frame coordinates
+        double s = bundle.memberSize(tagID)/2;
+        addObjectPoints(s, bundle.memberT_oi(tagID),
+                        bundleObjectPoints[bundleName]);
+
+        //===== Corner points in the image frame coordinates
+        addImagePoints(detection, bundleImagePoints[bundleName]);
+
+        double z_dist = getDepthInRegion(
+          depth_image,
+          bundleImagePoints[bundleName],
+          min_range,
+          max_range,
+          depth_unit_conversion
+        );
+
+        if (z_dist != 0.0) {
+          applyDepthToObjectPoints(
+            bundleObjectPoints[bundleName],
+            z_dist
+          );
+        }
+      }
+    }
+
+    // Find this tag's description amongst the standalone tags
+    // Print warning when a tag was found that is neither part of a
+    // bundle nor standalone (thus it is a tag in the environment
+    // which the user specified no description for, or Apriltags
+    // misdetected a tag (bad ID or a false positive)).
+    StandaloneTagDescription* standaloneDescription;
+    if (!findStandaloneTagDescription(tagID, standaloneDescription,
+                                      !is_part_of_bundle))
+    {
+      continue;
+    }
+
+    //=================================================================
+    // The remainder of this for loop is concerned with standalone tag
+    // poses!
+    double tag_size = standaloneDescription->size();
+
+    // Get estimated tag pose in the camera frame.
+    //
+    // Note on frames:
+    // The raw AprilTag 2 uses the following frames:
+    //   - camera frame: looking from behind the camera (like a
+    //     photographer), x is right, y is up and z is towards you
+    //     (i.e. the back of camera)
+    //   - tag frame: looking straight at the tag (oriented correctly),
+    //     x is right, y is down and z is away from you (into the tag).
+    // But we want:
+    //   - camera frame: looking from behind the camera (like a
+    //     photographer), x is right, y is down and z is straight
+    //     ahead
+    //   - tag frame: looking straight at the tag (oriented correctly),
+    //     x is right, y is up and z is towards you (out of the tag).
+    // Using these frames together with cv::solvePnP directly avoids
+    // AprilTag 2's frames altogether.
+    // TODO solvePnP[Ransac] better?
+    std::vector<cv::Point3d > standaloneTagObjectPoints;
+    std::vector<cv::Point2d > standaloneTagImagePoints;
+    addObjectPoints(tag_size/2, cv::Matx44d::eye(), standaloneTagObjectPoints);
+    addImagePoints(detection, standaloneTagImagePoints);
+    Eigen::Isometry3d transform = getRelativeTransform(standaloneTagObjectPoints,
+                                                     standaloneTagImagePoints,
+                                                     fx, fy, cx, cy);
+    geometry_msgs::PoseWithCovarianceStamped tag_pose =
+        makeTagPose(transform, image->header);
+
+    // Add the detection to the back of the tag detection array
+    AprilTagDetection tag_detection;
+    tag_detection.pose = tag_pose;
+    tag_detection.id.push_back(detection->id);
+    tag_detection.size.push_back(tag_size);
+    tag_detection_array.detections.push_back(tag_detection);
+    detection_names.push_back(standaloneDescription->frame_name());
+  }
+
+  //=================================================================
+  // Estimate bundle origin pose for each bundle in which at least one
+  // member tag was detected
+
+  for (unsigned int j=0; j<tag_bundle_descriptions_.size(); j++)
+  {
+    // Get bundle name
+    std::string bundleName = tag_bundle_descriptions_[j].name();
+
+    std::map<std::string,
+             std::vector<cv::Point3d> >::iterator it =
+        bundleObjectPoints.find(bundleName);
+    if (it != bundleObjectPoints.end())
+    {
+      // Some member tags of this bundle were detected, get the bundle's
+      // position!
+      TagBundleDescription& bundle = tag_bundle_descriptions_[j];
+
+      Eigen::Isometry3d transform =
+          getRelativeTransform(bundleObjectPoints[bundleName],
+                               bundleImagePoints[bundleName], fx, fy, cx, cy);
+      geometry_msgs::PoseWithCovarianceStamped bundle_pose =
+          makeTagPose(transform, image->header);
+
+      // Add the detection to the back of the tag detection array
+      AprilTagDetection tag_detection;
+      tag_detection.pose = bundle_pose;
+      tag_detection.id = bundle.bundleIds();
+      tag_detection.size = bundle.bundleSizes();
+      tag_detection_array.detections.push_back(tag_detection);
+      detection_names.push_back(bundle.name());
+    }
+  }
+
+  // If set, publish the transform /tf topic
+  if (publish_tf_) {
+    double timestamp_offset = 0.0;
+    for (unsigned int i=0; i<tag_detection_array.detections.size(); i++) {
+      geometry_msgs::PoseStamped pose;
+      pose.pose = tag_detection_array.detections[i].pose.pose.pose;
+      pose.header = tag_detection_array.detections[i].pose.header;
+      tf::Stamped<tf::Transform> tag_transform;
+      tf::poseStampedMsgToTF(pose, tag_transform);
+      double random_offset = ((double) rand() / (RAND_MAX));
+      timestamp_offset = random_offset * 1E-6 * (i + 1);  // prevent TF_REPEATED_DATA warning
+      tf_pub_.sendTransform(tf::StampedTransform(tag_transform,
+                                                 tag_transform.stamp_ + ros::Duration(timestamp_offset),
+                                                 image->header.frame_id,
+                                                 detection_names[i]));
+    }
+  }
+
+  return tag_detection_array;
+}
+
+
 void TagDetector::addObjectPoints (
     double s, cv::Matx44d T_oi, std::vector<cv::Point3d >& objectPoints) const
 {

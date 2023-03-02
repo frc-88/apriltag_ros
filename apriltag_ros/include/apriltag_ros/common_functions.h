@@ -215,6 +215,27 @@ class TagDetector
       const cv_bridge::CvImagePtr& image,
       const sensor_msgs::CameraInfoConstPtr& camera_info);
 
+  // Detect tags in an image. Enhance estimates with depth image
+  AprilTagDetectionArray detectTags(
+      const cv_bridge::CvImagePtr& image,
+      const cv_bridge::CvImagePtr& depth,
+      const sensor_msgs::CameraInfoConstPtr& camera_info,
+      double min_range,
+      double max_range);
+
+  double getDepthInRegion(
+      cv::Mat depth_image,
+      std::vector<cv::Point2d >& imagePoints,
+      double min_range,
+      double max_range,
+      double unit_conversion);
+  
+  void applyDepthToObjectPoints(
+      std::vector<cv::Point3d >& objectPoints,
+      double z_dist);
+
+  double getDepthConversion(std::string encoding);
+
   // Get the pose of the tag in the camera frame
   // Returns homogeneous transformation matrix [R,t;[0 0 0 1]] which
   // takes a point expressed in the tag frame to the same point
