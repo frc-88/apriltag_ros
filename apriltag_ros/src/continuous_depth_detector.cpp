@@ -123,6 +123,9 @@ void ContinuousDepthDetector::imageCallback (
   }
 
   // Publish detected tags in the image by AprilTag 2
+  if (cv_depth_ == NULL) {
+    ROS_WARN_THROTTLE(2.0, "No depth image received. Can't find tags.");
+  }
   tag_detections_publisher_.publish(
       tag_detector_->detectTags(cv_image_, cv_depth_, camera_info, depth_min_range_, depth_max_range_));
 
@@ -141,6 +144,7 @@ void ContinuousDepthDetector::depthCallback (
   try
   {
     cv_depth_ = cv_bridge::toCvCopy(depth_rect);  // encoding: passthrough
+    ROS_INFO_ONCE("Depth image for tags received.");
   }
   catch (cv_bridge::Exception& e)
   {
