@@ -493,21 +493,16 @@ void TagDetector::applyDepthToObjectPoints(
       double z_dist
   )
 {
-  // find average z distance to all points (z_avg)
-  // project a ray to each point
-  // scale point along ray projection by z_dist / z_avg
-  double z_sum = 0.0;
-  for (unsigned int index = 0; index < objectPoints.size(); index++) {
-    z_sum += objectPoints.at(index).z;
-  }
-  double z_avg = z_sum / objectPoints.size();
-  double projection_scale = z_dist / z_avg;
-
-  for (unsigned int index = 0; index < objectPoints.size(); index++) {
-    objectPoints.at(index).x *= projection_scale;
-    objectPoints.at(index).y *= projection_scale;
-    objectPoints.at(index).z *= projection_scale;
-  }
+  // cv::Mat homography_mat(detection->H->nrows, detection->H->ncols, CV_64F, detection->H->data);
+  // // find average z distance to all points (z_avg)
+  // // project a ray to each point
+  // // scale point along ray projection by z_dist / z_avg
+  // double z_sum = 0.0;
+  // for (unsigned int index = 0; index < objectPoints.size(); index++) {
+  //   z_sum += objectPoints.at(index).z;
+  // }
+  // double z_avg = z_sum / objectPoints.size();
+  // double projection_scale = z_dist / z_avg;
 }
 
 double TagDetector::getDepthConversion(std::string encoding)
