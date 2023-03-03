@@ -598,6 +598,8 @@ AprilTagDetectionArray TagDetector::detectTags (
     apriltag_detection_t *detection;
     zarray_get(detections_, i, &detection);
 
+    // compute depth in the color image region
+    // correct tag detection by computed distance
     double z_dist = getDepthInRegion(
       depth_image,
       detection,
