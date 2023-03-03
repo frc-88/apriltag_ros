@@ -459,14 +459,11 @@ void TagDetector::removeDuplicates ()
 
 double TagDetector::getDepthInRegion(
   cv::Mat depth_image,
-  apriltag_detection_t* detection,
+  std::vector<cv::Point2d >& image_points,
   double min_range,
   double max_range,
   double unit_conversion)
 {
-  std::vector<cv::Point2d > image_points;
-  addImagePoints(detection, image_points);
-
   cv::Mat mask = cv::Mat::zeros(depth_image.rows, depth_image.cols, CV_8UC1);
   std::vector<std::vector<cv::Point>> fillContAll;
   std::vector<cv::Point> fillContSingle;
@@ -489,23 +486,6 @@ double TagDetector::getDepthInRegion(
   double z_dist = cv::mean(depth_image, target_mask)[0];
   z_dist *= unit_conversion;
   return z_dist;
-}
-
-void TagDetector::applyDepthToDetection(
-      apriltag_detection_t* detection,
-      double z_dist
-  )
-{
-  cv::Mat homography_mat(detection->H->nrows, detection->H->ncols, CV_64F, detection->H->data);
-  // find average z distance to all points (z_avg)
-  // project a ray to each point
-  // scale point along ray projection by z_dist / z_avg
-  double z_sum = 0.0;
-  for (unsigned int index = 0; index < objectPoints.size(); index++) {
-    z_sum += objectPoints.at(index).z;
-  }
-  double z_avg = z_sum / objectPoints.size();
-  double projection_scale = z_dist / z_avg;
 }
 
 double TagDetector::getDepthConversion(std::string encoding)
@@ -598,23 +578,6 @@ AprilTagDetectionArray TagDetector::detectTags (
     apriltag_detection_t *detection;
     zarray_get(detections_, i, &detection);
 
-    // compute depth in the color image region
-    // correct tag detection by computed distance
-    double z_dist = getDepthInRegion(
-      depth_image,
-      detection,
-      min_range,
-      max_range,
-      depth_unit_conversion
-    );
-
-    if (z_dist != 0.0) {
-      applyDepthToDetection(
-        detection,
-        z_dist
-      );
-    }
-
     // Bootstrap this for loop to find this tag's description amongst
     // the tag bundles. If found, add its points to the bundle's set of
     // object-image corresponding points (tag corners) for cv::solvePnP.
@@ -683,11 +646,24 @@ AprilTagDetectionArray TagDetector::detectTags (
     std::vector<cv::Point2d > standaloneTagImagePoints;
     addObjectPoints(tag_size/2, cv::Matx44d::eye(), standaloneTagObjectPoints);
     addImagePoints(detection, standaloneTagImagePoints);
+
     Eigen::Isometry3d transform = getRelativeTransform(standaloneTagObjectPoints,
                                                      standaloneTagImagePoints,
                                                      fx, fy, cx, cy);
     geometry_msgs::PoseWithCovarianceStamped tag_pose =
         makeTagPose(transform, image->header);
+
+    double z_dist = getDepthInRegion(
+      depth_image,
+      standaloneTagImagePoints,
+      min_range,
+      max_range,
+      depth_unit_conversion
+    );
+
+    if (z_dist != 0.0) {
+      tag_pose.pose.pose.position.z = z_dist;
+    }
 
     // Add the detection to the back of the tag detection array
     AprilTagDetection tag_detection;
